@@ -4,9 +4,6 @@ use tauri::{
     Manager, Runtime, PhysicalPosition, Position,
 };
 
-#[cfg(target_os = "macos")]
-use cocoa::appkit::{NSApp, NSApplication, NSApplicationActivationPolicy};
-
 #[tauri::command]
 fn get_home_dir() -> Result<String, String> {
     dirs::home_dir()
@@ -23,7 +20,9 @@ fn get_default_scripts_path() -> Result<String, String> {
 
 fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let menu = Menu::new(app)?;
+    let toggle = MenuItem::new(app, "Show/Hide", true, None::<&str>)?;
     let quit = MenuItem::new(app, "Quit", true, None::<&str>)?;
+    menu.append(&toggle)?;
     menu.append(&quit)?;
 
     let _tray = TrayIconBuilder::with_id("main-tray")
@@ -31,9 +30,21 @@ fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
         .icon_as_template(true)
         .tooltip("Scripts Runner")
         .menu(&menu)
+        .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| {
             if event.id() == quit.id() {
                 app.exit(0);
+                return;
+            }
+            if event.id() == toggle.id() {
+                if let Some(window) = app.get_webview_window("main") {
+                    if window.is_visible().unwrap_or(false) {
+                        let _ = window.hide();
+                    } else {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
             }
         })
         .on_tray_icon_event(|tray, event| {
@@ -91,9 +102,7 @@ pub fn run() {
         .setup(|app| {
             // Hide from Dock on macOS
             #[cfg(target_os = "macos")]
-            unsafe {
-                NSApp().setActivationPolicy_(NSApplicationActivationPolicy::NSApplicationActivationPolicyAccessory);
-            }
+            app.handle().set_activation_policy(tauri::ActivationPolicy::Accessory)?;
 
             create_tray(app.handle())?;
 

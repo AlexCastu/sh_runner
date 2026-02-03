@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Scripts Runner",
   "version": "1.0.0",
-  "identifier": "com.scriptsrunner.app",
+  "identifier": "com.scriptsrunner.runner",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
