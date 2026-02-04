@@ -11,6 +11,8 @@ interface HeaderProps {
   onSettings: () => void;
   onQuit: () => void;
   isRefreshing: boolean;
+  searchInputRef?: React.RefObject<HTMLInputElement>;
+  queueInfo: { running: number; queued: number };
 }
 
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
@@ -30,16 +32,17 @@ export const Header: React.FC<HeaderProps> = ({
   onSettings,
   onQuit,
   isRefreshing,
+  searchInputRef,
+  queueInfo,
 }) => {
   const [showSort, setShowSort] = useState(false);
-  const displayPath = scriptsFolder.replace(/^\/Users\/[^/]+/, '~');
+  const displayPath = scriptsFolder ? scriptsFolder.replace(/^\/Users\/[^/]+/, '~') : 'No folder selected';
 
   return (
-    <div className="px-3 py-2 border-b border-zinc-700 bg-zinc-850">
-      {/* Search */}
+    <div className="app-header px-3 py-2">
       <div className="relative mb-2">
         <svg
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500"
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -47,16 +50,18 @@ export const Header: React.FC<HeaderProps> = ({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
         <input
+          ref={searchInputRef}
           type="text"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search scripts..."
-          className="w-full pl-8 pr-3 py-1.5 bg-zinc-800 border border-zinc-600 rounded-md text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+          className="w-full pl-8 pr-9 py-2 rounded-md text-sm app-input focus:outline-none focus:border-[color:var(--accent)]"
         />
         {searchQuery && (
           <button
             onClick={() => onSearchChange('')}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 app-icon-btn"
+            title="Clear"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -65,21 +70,22 @@ export const Header: React.FC<HeaderProps> = ({
         )}
       </div>
 
-      {/* Controls */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-xs text-zinc-500 truncate">
+        <div className="flex items-center gap-2 text-xs text-secondary truncate">
           <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
           </svg>
           <span className="truncate">{displayPath}</span>
+          {(queueInfo.running > 0 || queueInfo.queued > 0) && (
+            <span className="text-muted">• {queueInfo.running} running / {queueInfo.queued} queued</span>
+          )}
         </div>
 
         <div className="flex items-center gap-0.5">
-          {/* Sort dropdown */}
           <div className="relative">
             <button
-              onClick={() => setShowSort(!showSort)}
-              className="p-1.5 rounded-md hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
+              onClick={() => setShowSort((prev) => !prev)}
+              className="app-icon-btn"
               title="Sort"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -88,7 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             {showSort && (
-              <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-800 border border-zinc-600 rounded-lg py-1 shadow-lg min-w-[140px]">
+              <div className="absolute right-0 top-full mt-1 z-50 app-dropdown min-w-[150px] py-1">
                 {SORT_OPTIONS.map((option) => (
                   <button
                     key={option.value}
@@ -96,11 +102,7 @@ export const Header: React.FC<HeaderProps> = ({
                       onSortChange(option.value);
                       setShowSort(false);
                     }}
-                    className={`w-full px-3 py-1.5 text-left text-xs transition-colors ${
-                      sortBy === option.value
-                        ? 'text-zinc-200 bg-zinc-700'
-                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
-                    }`}
+                    className={`app-dropdown-item ${sortBy === option.value ? 'active' : ''}`}
                   >
                     {option.label}
                   </button>
@@ -109,11 +111,10 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* Refresh */}
           <button
             onClick={onRefresh}
             disabled={isRefreshing}
-            className="p-1.5 rounded-md hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50"
+            className="app-icon-btn disabled:opacity-50"
             title="Refresh"
           >
             <svg
@@ -131,10 +132,9 @@ export const Header: React.FC<HeaderProps> = ({
             </svg>
           </button>
 
-          {/* Settings */}
           <button
             onClick={onSettings}
-            className="p-1.5 rounded-md hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="app-icon-btn"
             title="Settings"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -153,10 +153,9 @@ export const Header: React.FC<HeaderProps> = ({
             </svg>
           </button>
 
-          {/* Quit */}
           <button
             onClick={onQuit}
-            className="p-1.5 rounded-md hover:bg-red-900/50 text-zinc-500 hover:text-red-400 transition-colors"
+            className="app-icon-btn hover:text-[color:var(--error)]"
             title="Quit Application"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -16,12 +16,13 @@
       {
         "title": "Scripts Runner",
         "label": "main",
-        "width": 300,
-        "height": 400,
+        "width": 360,
+        "height": 520,
         "resizable": false,
         "visible": false,
         "decorations": false,
         "transparent": true,
+        "shadow": false,
         "skipTaskbar": true,
         "alwaysOnTop": true,
         "focus": false
@@ -53,6 +54,9 @@
   "plugins": {
     "shell": {
       "open": true
+    },
+    "globalShortcut": {
+      "shortcut": true
     }
   }
 }

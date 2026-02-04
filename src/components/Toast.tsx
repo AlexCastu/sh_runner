@@ -20,21 +20,16 @@ export const Toast: React.FC<ToastProps> = ({ toast, onClose }) => {
     return () => clearTimeout(timer);
   }, [toast.id, onClose]);
 
-  const styles = {
-    success: 'bg-zinc-800 border-zinc-600 text-zinc-300',
-    error: 'bg-zinc-800 border-red-800 text-zinc-300',
-    info: 'bg-zinc-800 border-zinc-600 text-zinc-300',
-  }[toast.type];
-
+  const styles = 'bg-[color:var(--bg-elev)] border-[color:var(--border)] text-primary';
   const iconStyles = {
-    success: 'text-green-500',
-    error: 'text-red-500',
-    info: 'text-zinc-500',
+    success: 'text-[color:var(--success)]',
+    error: 'text-[color:var(--error)]',
+    info: 'text-[color:var(--accent)]',
   }[toast.type];
 
   return (
     <div
-      className={`${styles} border px-3 py-2 rounded-md shadow-lg flex items-center gap-2 text-xs animate-slide-in`}
+      className={`${styles} border px-3 py-2 rounded-md shadow-lg shadow-[rgba(5,7,18,0.25)] flex items-center gap-2 text-xs animate-slide-in`}
     >
       <span className={`flex-shrink-0 ${iconStyles}`}>
         {toast.type === 'success' && (
@@ -56,7 +51,7 @@ export const Toast: React.FC<ToastProps> = ({ toast, onClose }) => {
       <span className="flex-1">{toast.message}</span>
       <button
         onClick={() => onClose(toast.id)}
-        className="flex-shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors"
+        className="flex-shrink-0 text-secondary hover:text-primary transition-colors"
       >
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

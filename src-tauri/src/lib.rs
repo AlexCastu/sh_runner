@@ -1,4 +1,5 @@
 use tauri::{
+    utils::config::Color,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, Runtime, PhysicalPosition, Position,
@@ -99,6 +100,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             // Hide from Dock on macOS
             #[cfg(target_os = "macos")]
@@ -109,6 +111,8 @@ pub fn run() {
             // Hide window when it loses focus
             let handle = app.handle().clone();
             if let Some(window) = handle.get_webview_window("main") {
+                let _ = window.set_shadow(false);
+                let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
                 let window_clone = window.clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::Focused(false) = event {

@@ -89,9 +89,23 @@ export interface ExecutionResult {
 // Store running processes for cancellation
 const runningProcesses = new Map<string, Child>();
 
+function buildEnvString(envVars: Record<string, string>): string {
+  return Object.entries(envVars)
+    .map(([k, v]) => `export ${k}="${v.replace(/\"/g, '\\"')}"`)
+    .join('; ');
+}
+
+function buildCommand(scriptPath: string, envVars: Record<string, string>, args: string): string {
+  const envString = buildEnvString(envVars);
+  const argString = args.trim();
+  const base = `bash "${scriptPath}"${argString ? ` ${argString}` : ''}`;
+  return envString ? `${envString}; ${base}` : base;
+}
+
 export async function executeScript(
   scriptPath: string,
   envVars: Record<string, string> = {},
+  args: string = '',
   timeoutSeconds: number = 0,
   onOutput?: (line: string, isError: boolean) => void
 ): Promise<ExecutionResult> {
@@ -101,15 +115,7 @@ export async function executeScript(
   await makeExecutable(scriptPath);
 
   try {
-    // Build environment string for bash
-    const envString = Object.entries(envVars)
-      .map(([k, v]) => `export ${k}="${v}"`)
-      .join('; ');
-
-    const fullCommand = envString
-      ? `${envString}; bash "${scriptPath}"`
-      : `bash "${scriptPath}"`;
-
+    const fullCommand = buildCommand(scriptPath, envVars, args);
     const command = Command.create('bash', ['-c', fullCommand]);
 
     let stdout = '';
@@ -180,6 +186,33 @@ export async function executeScript(
       timedOut: false,
     };
   }
+}
+
+export async function runScriptInTerminal(
+  scriptPath: string,
+  envVars: Record<string, string> = {},
+  args: string = ''
+): Promise<void> {
+  await makeExecutable(scriptPath);
+  const fullCommand = buildCommand(scriptPath, envVars, args);
+  const osaScript = `tell application "Terminal" to do script ${JSON.stringify(fullCommand)}`;
+  const command = Command.create('osascript', ['-e', osaScript]);
+  await command.execute();
+}
+
+export async function revealInFinder(scriptPath: string): Promise<void> {
+  const command = Command.create('open', ['-R', scriptPath]);
+  await command.execute();
+}
+
+export async function openInEditor(scriptPath: string, editorApp?: string): Promise<void> {
+  if (editorApp && editorApp.trim().length > 0) {
+    const command = Command.create('open', ['-a', editorApp, scriptPath]);
+    await command.execute();
+    return;
+  }
+  const fallback = Command.create('open', [scriptPath]);
+  await fallback.execute();
 }
 
 export async function cancelScript(scriptPath: string): Promise<boolean> {

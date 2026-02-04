@@ -2,7 +2,9 @@
   "$schema": "https://schema.tauri.app/config/2/capability",
   "identifier": "default",
   "description": "Default capability for the main window",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:default",
@@ -12,6 +14,9 @@
     "core:window:allow-set-position",
     "core:window:allow-set-size",
     "core:window:allow-set-focus",
+    "core:window:allow-set-background-color",
+    "core:webview:allow-set-webview-background-color",
+    "core:window:allow-set-shadow",
     "shell:default",
     "shell:allow-open",
     {
@@ -30,6 +35,16 @@
         {
           "name": "chmod",
           "cmd": "chmod",
+          "args": true
+        },
+        {
+          "name": "osascript",
+          "cmd": "osascript",
+          "args": true
+        },
+        {
+          "name": "open",
+          "cmd": "open",
           "args": true
         }
       ]
@@ -50,6 +65,16 @@
         {
           "name": "chmod",
           "cmd": "chmod",
+          "args": true
+        },
+        {
+          "name": "osascript",
+          "cmd": "osascript",
+          "args": true
+        },
+        {
+          "name": "open",
+          "cmd": "open",
           "args": true
         }
       ]
@@ -72,21 +97,33 @@
     {
       "identifier": "fs:allow-read-dir",
       "allow": [
-        { "path": "$HOME/**" },
-        { "path": "/Users/**" }
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "/Users/**"
+        }
       ]
     },
     {
       "identifier": "fs:allow-exists",
       "allow": [
-        { "path": "$HOME/**" },
-        { "path": "/Users/**" }
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "/Users/**"
+        }
       ]
     },
     "notification:default",
     "notification:allow-notify",
     "notification:allow-request-permission",
     "notification:allow-is-permission-granted",
+    "global-shortcut:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all",
     "process:default",
     "process:allow-exit"
   ]

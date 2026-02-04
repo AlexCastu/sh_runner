@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
 import type { Script } from '../types';
-import { formatTimestamp, formatDuration } from '../lib/scripts';
+import { formatTimestamp } from '../lib/scripts';
 
 interface ScriptItemProps {
   script: Script;
   index: number;
+  isSelected: boolean;
   onRun: (script: Script) => void;
+  onRunInTerminal: (script: Script) => void;
   onCancel: (script: Script) => void;
   onForceReset: (script: Script) => void;
+  onDequeue: (script: Script) => void;
   onToggleFavorite: (script: Script) => void;
   onShowLogs: (script: Script) => void;
   onSetIcon: (script: Script, icon: string | null) => void;
+  onReveal: (script: Script) => void;
+  onOpenInEditor: (script: Script) => void;
+  onSelect: (script: Script) => void;
 }
 
 const EMOJI_OPTIONS = ['🚀', '⚡', '🔧', '📦', '🎯', '💾', '🔄', '📊', '🧹', '🔒', null];
@@ -18,81 +24,102 @@ const EMOJI_OPTIONS = ['🚀', '⚡', '🔧', '📦', '🎯', '💾', '🔄', '�
 export const ScriptItem: React.FC<ScriptItemProps> = ({
   script,
   index,
+  isSelected,
   onRun,
+  onRunInTerminal,
   onCancel,
   onForceReset,
+  onDequeue,
   onToggleFavorite,
   onShowLogs,
   onSetIcon,
+  onReveal,
+  onOpenInEditor,
+  onSelect,
 }) => {
   const [showIconPicker, setShowIconPicker] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const hasRun = script.lastExecution !== null;
   const shortcutKey = index < 9 ? index + 1 : null;
+  const hasError = script.exitCode !== null && script.exitCode !== 0;
+
+  const handleCopyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(script.path);
+    } catch {
+      // ignore
+    }
+  };
 
   return (
     <div className="group relative">
-      <div className="flex items-center justify-between px-3 py-2 hover:bg-zinc-800 rounded-lg transition-colors">
-        {/* Icon / Status */}
+      <div
+        onClick={() => onSelect(script)}
+        className={`app-row ${isSelected ? 'selected' : ''} flex items-center justify-between px-4 py-3 cursor-pointer`}
+      >
         <button
           onClick={() => setShowIconPicker(!showIconPicker)}
-          className="w-6 h-6 flex items-center justify-center flex-shrink-0 hover:bg-zinc-700 rounded transition-colors"
+          className="app-icon-btn w-7 h-7 flex items-center justify-center flex-shrink-0"
           title="Change icon"
         >
           {script.running ? (
-            <span className="w-3 h-3 rounded-full bg-amber-500 animate-pulse" />
+            <span className="w-3 h-3 rounded-full bg-[color:var(--accent)] animate-pulse" />
+          ) : script.queued ? (
+            <span className="w-3 h-3 rounded-full bg-[color:var(--accent-hover)]" />
           ) : script.icon ? (
             <span className="text-sm">{script.icon}</span>
+          ) : hasError ? (
+            <span className="w-2.5 h-2.5 rounded-full bg-[color:var(--error)]" />
           ) : hasRun ? (
-            <svg className="w-4 h-4 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           ) : (
-            <span className="w-2 h-2 rounded-full bg-zinc-600" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[color:var(--text-muted)]" />
           )}
         </button>
 
-        {/* Script info */}
         <div className="flex-1 min-w-0 ml-2">
           <div className="flex items-center gap-2">
-            <p className="text-sm text-zinc-200 truncate">{script.name}</p>
+            <p className="text-base text-primary truncate leading-tight">{script.name}</p>
             {script.favorite && (
-              <svg className="w-3 h-3 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3 h-3 text-[color:var(--accent)] flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
               </svg>
             )}
             {shortcutKey && (
-              <span className="text-[10px] text-zinc-600 bg-zinc-800 px-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="text-[10px] text-muted bg-[rgba(94,158,250,0.16)] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                 ⌘{shortcutKey}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <div className="flex items-center gap-2 text-xs text-secondary">
             {script.running ? (
-              <span className="text-amber-500">Running...</span>
+              <span className="text-[color:var(--accent)]">Running...</span>
+            ) : script.queued ? (
+              <span className="text-[color:var(--accent-hover)]">Queued</span>
             ) : (
               <>
-                {hasRun && <span>{formatTimestamp(script.lastExecution)}</span>}
-                {script.lastDuration !== null && (
-                  <span className="text-zinc-600">• {formatDuration(script.lastDuration)}</span>
+                {hasRun ? (
+                  <span>Last run {formatTimestamp(script.lastExecution)}</span>
+                ) : (
+                  <span>Not run yet</span>
                 )}
-                {script.runCount > 0 && (
-                  <span className="text-zinc-600">• {script.runCount}×</span>
+                {script.timedOut && (
+                  <span className="text-[color:var(--error)]">• Timed out</span>
+                )}
+                {hasError && (
+                  <span className="text-[color:var(--error)]">• Failed</span>
                 )}
               </>
             )}
           </div>
         </div>
 
-        {/* Actions */}
         <div className="flex items-center gap-0.5 ml-2">
-          {/* Favorite */}
           <button
             onClick={() => onToggleFavorite(script)}
-            className={`p-1.5 rounded-md transition-colors ${
-              script.favorite
-                ? 'text-amber-500 hover:text-amber-400'
-                : 'text-zinc-600 hover:text-zinc-400 opacity-0 group-hover:opacity-100'
-            }`}
+            className={`app-icon-btn ${script.favorite ? 'text-[color:var(--accent)]' : 'opacity-0 group-hover:opacity-100'}`}
             title={script.favorite ? 'Remove from favorites' : 'Add to favorites'}
           >
             <svg className="w-3.5 h-3.5" fill={script.favorite ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
@@ -100,11 +127,10 @@ export const ScriptItem: React.FC<ScriptItemProps> = ({
             </svg>
           </button>
 
-          {/* Logs */}
           {hasRun && (
             <button
               onClick={() => onShowLogs(script)}
-              className="p-1.5 rounded-md text-zinc-600 hover:text-zinc-400 opacity-0 group-hover:opacity-100 transition-colors"
+              className="app-icon-btn opacity-0 group-hover:opacity-100"
               title="View logs"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -113,12 +139,11 @@ export const ScriptItem: React.FC<ScriptItemProps> = ({
             </button>
           )}
 
-          {/* Run / Cancel */}
           {script.running ? (
             <div className="flex items-center gap-0.5">
               <button
                 onClick={() => onCancel(script)}
-                className="p-1.5 rounded-md text-zinc-400 hover:text-amber-400 hover:bg-zinc-700 transition-colors"
+                className="app-icon-btn hover:text-[color:var(--accent)]"
                 title="Cancel"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -128,7 +153,7 @@ export const ScriptItem: React.FC<ScriptItemProps> = ({
               </button>
               <button
                 onClick={() => onForceReset(script)}
-                className="p-1.5 rounded-md text-zinc-400 hover:text-red-400 hover:bg-zinc-700 transition-colors"
+                className="app-icon-btn hover:text-[color:var(--error)]"
                 title="Force stop (reset stuck state)"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -136,10 +161,20 @@ export const ScriptItem: React.FC<ScriptItemProps> = ({
                 </svg>
               </button>
             </div>
+          ) : script.queued ? (
+            <button
+              onClick={() => onDequeue(script)}
+              className="app-icon-btn text-[color:var(--accent-hover)]"
+              title="Remove from queue"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           ) : (
             <button
               onClick={() => onRun(script)}
-              className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+              className="app-icon-btn"
               title="Run script"
             >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -147,13 +182,52 @@ export const ScriptItem: React.FC<ScriptItemProps> = ({
               </svg>
             </button>
           )}
+
+          <div className="relative">
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              className="app-icon-btn opacity-0 group-hover:opacity-100"
+              title="More"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6h.01M12 12h.01M12 18h.01" />
+              </svg>
+            </button>
+            {showMenu && (
+              <div className="absolute right-0 top-full mt-1 z-50 app-dropdown min-w-[190px] py-1">
+                <button
+                  onClick={() => { onRunInTerminal(script); setShowMenu(false); }}
+                  className="app-dropdown-item"
+                >
+                  Run in Terminal
+                </button>
+                <button
+                  onClick={() => { onReveal(script); setShowMenu(false); }}
+                  className="app-dropdown-item"
+                >
+                  Reveal in Finder
+                </button>
+                <button
+                  onClick={() => { onOpenInEditor(script); setShowMenu(false); }}
+                  className="app-dropdown-item"
+                >
+                  Open in Editor
+                </button>
+                <button
+                  onClick={() => { handleCopyPath(); setShowMenu(false); }}
+                  className="app-dropdown-item"
+                >
+                  Copy Path
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Icon Picker */}
       {showIconPicker && (
-        <div className="absolute left-8 top-full mt-1 z-10 bg-zinc-800 border border-zinc-600 rounded-lg p-2 shadow-lg">
-          <div className="flex gap-1 flex-wrap max-w-[160px]">
+        <div className="absolute left-8 top-full mt-1 z-50 app-dropdown p-2">
+          <div className="flex gap-1 flex-wrap max-w-[170px]">
             {EMOJI_OPTIONS.map((emoji, i) => (
               <button
                 key={i}
@@ -161,12 +235,12 @@ export const ScriptItem: React.FC<ScriptItemProps> = ({
                   onSetIcon(script, emoji);
                   setShowIconPicker(false);
                 }}
-                className={`w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-700 transition-colors ${
-                  script.icon === emoji ? 'bg-zinc-700' : ''
+                className={`w-7 h-7 flex items-center justify-center rounded-md transition-colors ${
+                  script.icon === emoji ? 'bg-[rgba(94,158,250,0.18)]' : 'hover:bg-[rgba(94,158,250,0.12)]'
                 }`}
               >
                 {emoji || (
-                  <svg className="w-4 h-4 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 )}

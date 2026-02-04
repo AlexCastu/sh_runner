@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { load, Store } from '@tauri-apps/plugin-store';
-import type { AppSettings, ScriptData, SortOption } from '../types';
+import type { AppSettings, ScriptData, SortOption, ExecutionEntry } from '../types';
 
 const STORE_FILE = 'scripts-state.json';
 
@@ -10,6 +10,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
   defaultTimeout: 300, // 5 minutes
   sortBy: 'favorite',
+  maxConcurrent: 2,
+  editorApp: 'Visual Studio Code',
+  globalHotkey: 'CommandOrControl+Shift+R',
+  historyLimit: 20,
+  folderProfiles: [],
 };
 
 let storeInstance: Store | null = null;
@@ -82,10 +87,16 @@ export function useStore() {
         lastDuration: null,
         lastOutput: null,
         lastError: null,
+        lastExitCode: null,
+        lastTimedOut: false,
         favorite: false,
         icon: null,
         runCount: 0,
         envVars: {},
+        args: '',
+        timeoutSeconds: 0,
+        tags: [],
+        history: [],
       };
 
       if (existingIndex >= 0) {
@@ -130,23 +141,57 @@ export function useStore() {
     await updateScriptData(path, { envVars });
   }, [updateScriptData]);
 
+  // Set script args
+  const setScriptArgs = useCallback(async (path: string, args: string) => {
+    await updateScriptData(path, { args });
+  }, [updateScriptData]);
+
+  // Set script tags
+  const setScriptTags = useCallback(async (path: string, tags: string[]) => {
+    await updateScriptData(path, { tags });
+  }, [updateScriptData]);
+
+  // Set script timeout override
+  const setScriptTimeout = useCallback(async (path: string, timeoutSeconds: number) => {
+    await updateScriptData(path, { timeoutSeconds });
+  }, [updateScriptData]);
+
+  // Clear history
+  const clearScriptHistory = useCallback(async (path: string) => {
+    await updateScriptData(path, {
+      history: [],
+      lastExecution: null,
+      lastDuration: null,
+      lastOutput: null,
+      lastError: null,
+      lastExitCode: null,
+      lastTimedOut: false,
+    });
+  }, [updateScriptData]);
+
   // Record execution
   const recordExecution = useCallback(async (
     path: string,
-    duration: number,
-    output: string,
-    errorOutput: string,
-    _exitCode: number
+    entry: ExecutionEntry
   ) => {
     const current = scriptsData.get(path);
+    const existingHistory = current?.history || [];
+    const limit = settings.historyLimit;
+    const nextHistory = limit === 0
+      ? [entry, ...existingHistory]
+      : [entry, ...existingHistory].slice(0, limit);
+
     await updateScriptData(path, {
-      lastExecution: new Date().toISOString(),
-      lastDuration: duration,
-      lastOutput: output,
-      lastError: errorOutput,
+      lastExecution: entry.at,
+      lastDuration: entry.duration,
+      lastOutput: entry.stdout,
+      lastError: entry.stderr,
+      lastExitCode: entry.exitCode,
+      lastTimedOut: entry.timedOut,
       runCount: (current?.runCount ?? 0) + 1,
+      history: nextHistory,
     });
-  }, [scriptsData, updateScriptData]);
+  }, [scriptsData, updateScriptData, settings.historyLimit]);
 
   // Change sort option
   const setSortBy = useCallback(async (sortBy: SortOption) => {
@@ -178,6 +223,10 @@ export function useStore() {
     toggleFavorite,
     setScriptIcon,
     setScriptEnvVars,
+    setScriptArgs,
+    setScriptTags,
+    setScriptTimeout,
+    clearScriptHistory,
     recordExecution,
     setSortBy,
     addFolder,
