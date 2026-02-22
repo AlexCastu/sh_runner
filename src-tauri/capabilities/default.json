@@ -116,6 +116,28 @@
         }
       ]
     },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "/Users/**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "/Users/**"
+        }
+      ]
+    },
     "notification:default",
     "notification:allow-notify",
     "notification:allow-request-permission",

@@ -15,6 +15,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   globalHotkey: 'CommandOrControl+Shift+R',
   historyLimit: 20,
   folderProfiles: [],
+  viewMode: 'flat',
+  collapsedFolders: [],
+  activeTagFilters: [],
 };
 
 let storeInstance: Store | null = null;
@@ -97,6 +100,7 @@ export function useStore() {
         timeoutSeconds: 0,
         tags: [],
         history: [],
+        confirmBeforeRun: false,
       };
 
       if (existingIndex >= 0) {
@@ -154,6 +158,11 @@ export function useStore() {
   // Set script timeout override
   const setScriptTimeout = useCallback(async (path: string, timeoutSeconds: number) => {
     await updateScriptData(path, { timeoutSeconds });
+  }, [updateScriptData]);
+
+  // Set confirm before run
+  const setConfirmBeforeRun = useCallback(async (path: string, confirmBeforeRun: boolean) => {
+    await updateScriptData(path, { confirmBeforeRun });
   }, [updateScriptData]);
 
   // Clear history
@@ -226,6 +235,7 @@ export function useStore() {
     setScriptArgs,
     setScriptTags,
     setScriptTimeout,
+    setConfirmBeforeRun,
     clearScriptHistory,
     recordExecution,
     setSortBy,

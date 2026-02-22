@@ -2,6 +2,7 @@ export interface Script {
   id: string;
   name: string;
   path: string;
+  folder: string; // relative folder name for grouping
   lastExecution: string | null;
   lastDuration: number | null; // milliseconds
   running: boolean;
@@ -18,6 +19,10 @@ export interface Script {
   tags?: string[];
   envVars?: Record<string, string>;
   history?: ExecutionEntry[];
+  startedAt?: string; // ISO timestamp when execution started (for live timer)
+  liveOutput?: string[]; // last N lines of live output
+  description?: string; // parsed from first comment lines in the .sh file
+  confirmBeforeRun?: boolean; // show confirmation dialog before execution
 }
 
 export interface ExecutionEntry {
@@ -50,6 +55,9 @@ export interface AppSettings {
   globalHotkey: string;
   historyLimit: number;
   folderProfiles: FolderProfile[];
+  viewMode: ViewMode;
+  collapsedFolders: string[];
+  activeTagFilters: string[];
 }
 
 export interface ScriptData {
@@ -68,6 +76,7 @@ export interface ScriptData {
   timeoutSeconds: number;
   tags: string[];
   history: ExecutionEntry[];
+  confirmBeforeRun: boolean;
 }
 
 export interface StoreData {
@@ -76,3 +85,4 @@ export interface StoreData {
 }
 
 export type SortOption = 'name' | 'recent' | 'frequent' | 'favorite';
+export type ViewMode = 'flat' | 'grouped';

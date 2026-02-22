@@ -19,6 +19,14 @@ fn get_default_scripts_path() -> Result<String, String> {
         .ok_or_else(|| "Could not determine home directory".to_string())
 }
 
+#[tauri::command]
+fn set_tray_tooltip(app: tauri::AppHandle, tooltip: String) -> Result<(), String> {
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        tray.set_tooltip(Some(&tooltip)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let menu = Menu::new(app)?;
     let toggle = MenuItem::new(app, "Show/Hide", true, None::<&str>)?;
@@ -123,7 +131,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_home_dir, get_default_scripts_path])
+        .invoke_handler(tauri::generate_handler![get_home_dir, get_default_scripts_path, set_tray_tooltip])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

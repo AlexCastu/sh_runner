@@ -2,13 +2,17 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { sendNotification, isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
 import { register, unregisterAll } from '@tauri-apps/plugin-global-shortcut';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import type { Script, SortOption, FolderProfile, ExecutionEntry } from './types';
+import { invoke } from '@tauri-apps/api/core';
+import type { Script, SortOption, ViewMode, FolderProfile, ExecutionEntry } from './types';
 import { useStore } from './hooks/useStore';
 import {
   scanMultipleFolders,
   getScriptName,
+  getScriptFolder,
+  readScriptDescription,
   executeScript,
   cancelScript,
+  createScript,
   getDefaultScriptsPath,
   watchFolder,
   runScriptInTerminal,
@@ -22,6 +26,9 @@ import { Header } from './components/Header';
 import { ScriptList } from './components/ScriptList';
 import { SettingsModal } from './components/SettingsModal';
 import { LogsModal } from './components/LogsModal';
+import { ActionBar } from './components/ActionBar';
+import { ScriptConfigModal } from './components/ScriptConfigModal';
+import { CommandPalette } from './components/CommandPalette';
 import { ToastContainer, ToastData } from './components/Toast';
 
 function matchProfile(scriptPath: string, profiles: Array<FolderProfile & { expandedPath: string }>): FolderProfile | null {
@@ -44,6 +51,11 @@ function App() {
     getScriptData,
     toggleFavorite,
     setScriptIcon,
+    setScriptTags,
+    setScriptArgs,
+    setScriptEnvVars,
+    setScriptTimeout,
+    setConfirmBeforeRun,
     clearScriptHistory,
     recordExecution,
     addFolder,
@@ -55,12 +67,18 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showLogs, setShowLogs] = useState<Script | null>(null);
+  const [showConfig, setShowConfig] = useState<Script | null>(null);
   const [toasts, setToasts] = useState<ToastData[]>([]);
   const [initialized, setInitialized] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('favorite');
+  const [viewMode, setViewMode] = useState<ViewMode>(settings.viewMode || 'flat');
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set(settings.collapsedFolders || []));
+  const [activeTagFilters, setActiveTagFilters] = useState<string[]>(settings.activeTagFilters || []);
   const [queue, setQueue] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<{ script: Script; mode: 'background' | 'terminal' } | null>(null);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
 
   const unwatchRefs = useRef<(() => void)[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -149,11 +167,64 @@ function App() {
       result = result.filter(s => s.name.toLowerCase().includes(query));
     }
 
+    // Filter by active tags
+    if (activeTagFilters.length > 0) {
+      result = result.filter(s =>
+        activeTagFilters.some(tag => (s.tags || []).includes(tag))
+      );
+    }
+
     return sortScripts(result, sortBy);
-  }, [scripts, searchQuery, sortBy, sortScripts]);
+  }, [scripts, searchQuery, sortBy, activeTagFilters, sortScripts]);
+
+  // Collect all unique tags from scripts
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    scripts.forEach(s => (s.tags || []).forEach(t => tagSet.add(t)));
+    return Array.from(tagSet).sort();
+  }, [scripts]);
+
+  // Group scripts by folder
+  const groupedScripts = useMemo(() => {
+    if (viewMode !== 'grouped') return null;
+
+    const groups = new Map<string, Script[]>();
+
+    // Separate pinned scripts
+    const pinned = filteredScripts.filter(s => s.favorite);
+    const unpinned = filteredScripts.filter(s => !s.favorite);
+
+    for (const script of unpinned) {
+      const folder = script.folder || 'Ungrouped';
+      if (!groups.has(folder)) {
+        groups.set(folder, []);
+      }
+      groups.get(folder)!.push(script);
+    }
+
+    // Sort group names
+    const sortedGroups = Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
+    return {
+      pinned,
+      groups: sortedGroups.map(([folder, scripts]) => ({
+        folder,
+        scripts,
+        collapsed: collapsedFolders.has(folder),
+      })),
+    };
+  }, [filteredScripts, viewMode, collapsedFolders]);
 
   const runningCount = scripts.filter(s => s.running).length;
   const queuedCount = queue.length;
+
+  // Update tray tooltip when running count changes
+  useEffect(() => {
+    const tooltip = runningCount > 0
+      ? `Scripts Runner — ${runningCount} running`
+      : 'Scripts Runner';
+    invoke('set_tray_tooltip', { tooltip }).catch(() => {});
+  }, [runningCount]);
 
   const scanScripts = useCallback(async () => {
     if (!settings.scriptsFolder) return;
@@ -165,12 +236,13 @@ function App() {
       const allFolders = [settings.scriptsFolder, ...settings.additionalFolders];
       const paths = await scanMultipleFolders(allFolders);
       const homeDir = await getHomeDir();
+      const expandedFolders = allFolders.map(f => expandPath(f, homeDir));
       const profiles = (settings.folderProfiles || []).map((profile) => ({
         ...profile,
         expandedPath: expandPath(profile.path, homeDir),
       }));
 
-      const scriptList: Script[] = paths.map((path) => {
+      const scriptList: Script[] = await Promise.all(paths.map(async (path) => {
         const data = getScriptData(path);
         const profile = matchProfile(path, profiles);
         const mergedEnvVars = { ...(profile?.envVars || {}), ...(data?.envVars || {}) };
@@ -179,11 +251,14 @@ function App() {
           ? data.timeoutSeconds
           : (profile?.timeoutSeconds || 0);
         const previousState = scriptsRef.current.find(s => s.id === path);
+        const description = await readScriptDescription(path);
 
         return {
           id: path,
           name: getScriptName(path),
           path,
+          folder: getScriptFolder(path, expandedFolders),
+          description,
           lastExecution: data?.lastExecution || null,
           lastDuration: data?.lastDuration || null,
           running: previousState?.running || false,
@@ -200,11 +275,27 @@ function App() {
           tags: data?.tags || [],
           envVars: mergedEnvVars,
           history: data?.history || [],
+          startedAt: previousState?.startedAt || undefined,
+          liveOutput: previousState?.liveOutput || undefined,
+          confirmBeforeRun: data?.confirmBeforeRun || false,
         };
-      });
+      }));
 
       setQueue(prev => prev.filter(id => paths.includes(id)));
       setScripts(scriptList);
+
+      // Load descriptions asynchronously (non-blocking)
+      Promise.all(
+        scriptList.map(async (s) => {
+          const desc = await readScriptDescription(s.path);
+          return { id: s.id, description: desc };
+        })
+      ).then((descriptions) => {
+        const descMap = new Map(descriptions.filter(d => d.description).map(d => [d.id, d.description]));
+        if (descMap.size > 0) {
+          setScripts(prev => prev.map(s => descMap.has(s.id) ? { ...s, description: descMap.get(s.id) } : s));
+        }
+      }).catch(() => {});
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to scan folder';
       setError(message);
@@ -358,10 +449,11 @@ function App() {
       return;
     }
 
-    // Mark as running
+    // Mark as running with startedAt timestamp
+    const startedAt = new Date().toISOString();
     setScripts((prev) =>
       prev.map((s) =>
-        s.id === script.id ? { ...s, running: true, queued: false } : s
+        s.id === script.id ? { ...s, running: true, queued: false, startedAt, liveOutput: [] } : s
       )
     );
 
@@ -376,7 +468,17 @@ function App() {
         script.path,
         envVars,
         args,
-        timeoutSeconds
+        timeoutSeconds,
+        // Live output callback
+        (line, _isError) => {
+          setScripts((prev) =>
+            prev.map((s) =>
+              s.id === script.id
+                ? { ...s, liveOutput: [...(s.liveOutput || []).slice(-9), line] }
+                : s
+            )
+          );
+        }
       );
 
       // Update script state
@@ -386,6 +488,8 @@ function App() {
             ? {
                 ...s,
                 running: false,
+                startedAt: undefined,
+                liveOutput: undefined,
                 lastExecution: new Date().toISOString(),
                 lastDuration: result.duration,
                 exitCode: result.exitCode,
@@ -456,6 +560,11 @@ function App() {
 
   const requestRun = useCallback((script: Script, mode: 'background' | 'terminal') => {
     if (script.running || script.queued) return;
+    // Check if confirmation is required
+    if (script.confirmBeforeRun) {
+      setPendingConfirm({ script, mode });
+      return;
+    }
     if (mode === 'terminal') {
       runScriptNow(script, 'terminal');
       return;
@@ -526,6 +635,25 @@ function App() {
     addToast(`${script.name} removed from queue`, 'info');
   }, [addToast]);
 
+  const handleConfirmRun = useCallback(() => {
+    if (!pendingConfirm) return;
+    const { script, mode } = pendingConfirm;
+    setPendingConfirm(null);
+    if (mode === 'terminal') {
+      runScriptNow(script, 'terminal');
+      return;
+    }
+    const maxConcurrent = Math.max(1, settings.maxConcurrent || 1);
+    const running = scriptsRef.current.filter(s => s.running).length;
+    if (running >= maxConcurrent) {
+      setQueue(prev => (prev.includes(script.id) ? prev : [...prev, script.id]));
+      setScripts(prev => prev.map(s => s.id === script.id ? { ...s, queued: true } : s));
+      addToast(`${script.name} queued`, 'info');
+      return;
+    }
+    runScriptNow(script, 'background');
+  }, [pendingConfirm, settings.maxConcurrent, addToast, runScriptNow]);
+
   const handleToggleFavorite = useCallback(async (script: Script) => {
     await toggleFavorite(script.path);
     setScripts((prev) =>
@@ -556,6 +684,54 @@ function App() {
     setSortBy(sort);
     saveSettings({ sortBy: sort });
   }, [saveSettings]);
+
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    saveSettings({ viewMode: mode });
+  }, [saveSettings]);
+
+  const handleToggleFolderCollapse = useCallback((folder: string) => {
+    setCollapsedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(folder)) {
+        next.delete(folder);
+      } else {
+        next.add(folder);
+      }
+      saveSettings({ collapsedFolders: Array.from(next) });
+      return next;
+    });
+  }, [saveSettings]);
+
+  const handleTagFilterChange = useCallback((tags: string[]) => {
+    setActiveTagFilters(tags);
+    saveSettings({ activeTagFilters: tags });
+  }, [saveSettings]);
+
+  const handleSetScriptTags = useCallback(async (script: Script, tags: string[]) => {
+    await setScriptTags(script.path, tags);
+    setScripts(prev => prev.map(s => s.id === script.id ? { ...s, tags } : s));
+  }, [setScriptTags]);
+
+  const handleSaveArgs = useCallback(async (script: Script, args: string) => {
+    await setScriptArgs(script.path, args);
+    setScripts(prev => prev.map(s => s.id === script.id ? { ...s, args } : s));
+  }, [setScriptArgs]);
+
+  const handleSaveEnvVars = useCallback(async (script: Script, envVars: Record<string, string>) => {
+    await setScriptEnvVars(script.path, envVars);
+    setScripts(prev => prev.map(s => s.id === script.id ? { ...s, envVars } : s));
+  }, [setScriptEnvVars]);
+
+  const handleSaveTimeout = useCallback(async (script: Script, timeoutSeconds: number) => {
+    await setScriptTimeout(script.path, timeoutSeconds);
+    setScripts(prev => prev.map(s => s.id === script.id ? { ...s, timeoutSeconds } : s));
+  }, [setScriptTimeout]);
+
+  const handleSaveConfirmBeforeRun = useCallback(async (script: Script, confirmBeforeRun: boolean) => {
+    await setConfirmBeforeRun(script.path, confirmBeforeRun);
+    setScripts(prev => prev.map(s => s.id === script.id ? { ...s, confirmBeforeRun } : s));
+  }, [setConfirmBeforeRun]);
 
   const handleClearHistory = useCallback(async (script: Script) => {
     await clearScriptHistory(script.path);
@@ -590,6 +766,20 @@ function App() {
     });
   }, [clearScriptHistory]);
 
+  const handleCreateScript = useCallback(async (name: string) => {
+    if (!settings.scriptsFolder) return;
+    try {
+      const path = await createScript(settings.scriptsFolder, name);
+      addToast(`Created ${name}`, 'success');
+      await scanScripts();
+      // Open in editor for immediate editing
+      openInEditor(path, settings.editorApp).catch(() => {});
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create script';
+      addToast(msg, 'error');
+    }
+  }, [settings.scriptsFolder, settings.editorApp, addToast, scanScripts]);
+
   // Keep selection in sync
   useEffect(() => {
     if (filteredScripts.length === 0) {
@@ -606,6 +796,10 @@ function App() {
     function handleKeyDown(e: KeyboardEvent) {
       // Close modals on Escape
       if (e.key === 'Escape') {
+        if (pendingConfirm) {
+          setPendingConfirm(null);
+          return;
+        }
         if (showLogs) {
           setShowLogs(null);
           return;
@@ -616,8 +810,16 @@ function App() {
         }
       }
 
-      // Cmd+K or Cmd+F to focus search
-      if ((e.metaKey && e.key === 'k') || (e.metaKey && e.key === 'f')) {
+      // Cmd+P to open command palette
+      if (e.metaKey && e.key === 'p') {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowCommandPalette(true);
+        return;
+      }
+
+      // Cmd+F to focus inline filter
+      if (e.metaKey && e.key === 'f') {
         e.preventDefault();
         searchInputRef.current?.focus();
         return;
@@ -700,9 +902,9 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showLogs, showSettings, filteredScripts, scanScripts, selectedId, handleRunScript, handleRunInTerminal, settings.editorApp]);
+  }, [showLogs, showSettings, pendingConfirm, filteredScripts, scanScripts, selectedId, handleRunScript, handleRunInTerminal, settings.editorApp]);
 
-  const activeView = showSettings ? 'settings' : showLogs ? 'logs' : 'main';
+  const activeView = showSettings ? 'settings' : showLogs ? 'logs' : showConfig ? 'config' : 'main';
 
   if (isStoreLoading) {
     return (
@@ -732,6 +934,16 @@ function App() {
             onClearHistory={handleClearHistory}
           />
         )}
+        {activeView === 'config' && showConfig && (
+          <ScriptConfigModal
+            script={showConfig}
+            onClose={() => setShowConfig(null)}
+            onSaveArgs={handleSaveArgs}
+            onSaveEnvVars={handleSaveEnvVars}
+            onSaveTimeout={handleSaveTimeout}
+            onSaveConfirmBeforeRun={handleSaveConfirmBeforeRun}
+          />
+        )}
         <ToastContainer toasts={toasts} onClose={removeToast} />
       </div>
     );
@@ -743,21 +955,33 @@ function App() {
         scriptsFolder={settings.scriptsFolder}
         searchQuery={searchQuery}
         sortBy={sortBy}
+        viewMode={viewMode}
         onSearchChange={setSearchQuery}
         onSortChange={handleSortChange}
+        onViewModeChange={handleViewModeChange}
         onRefresh={scanScripts}
         onSettings={() => setShowSettings(true)}
         onQuit={() => exit(0)}
+        onCreateScript={handleCreateScript}
+        onOpenCommandPalette={() => setShowCommandPalette(true)}
         isRefreshing={isScanning}
         searchInputRef={searchInputRef}
         queueInfo={{ running: runningCount, queued: queuedCount }}
+        allTags={allTags}
+        activeTagFilters={activeTagFilters}
+        onTagFilterChange={handleTagFilterChange}
       />
 
       <ScriptList
         scripts={filteredScripts}
+        groupedScripts={groupedScripts}
+        viewMode={viewMode}
+        searchQuery={searchQuery}
         isLoading={isScanning && scripts.length === 0}
         error={error}
         selectedId={selectedId}
+        totalCount={scripts.length}
+        activeTagFilters={activeTagFilters}
         onRunScript={handleRunScript}
         onRunInTerminal={handleRunInTerminal}
         onCancelScript={handleCancelScript}
@@ -766,12 +990,65 @@ function App() {
         onToggleFavorite={handleToggleFavorite}
         onShowLogs={setShowLogs}
         onSetIcon={handleSetIcon}
+        onSetTags={handleSetScriptTags}
         onReveal={(script) => { revealInFinder(script.path).catch(() => {}); }}
         onOpenInEditor={(script) => { openInEditor(script.path, settings.editorApp).catch(() => {}); }}
+        onConfigure={(script) => setShowConfig(script)}
         onSelect={(script) => setSelectedId(script.id)}
+        onToggleFolderCollapse={handleToggleFolderCollapse}
+      />
+
+      <ActionBar
+        selectedScript={filteredScripts.find(s => s.id === selectedId) || null}
+        onRun={handleRunScript}
+        onRunInTerminal={handleRunInTerminal}
+        onCancel={handleCancelScript}
+        onDequeue={handleDequeue}
+        onShowLogs={setShowLogs}
+        onOpenInEditor={(script) => { openInEditor(script.path, settings.editorApp).catch(() => {}); }}
       />
 
       <ToastContainer toasts={toasts} onClose={removeToast} />
+
+      {/* Command Palette */}
+      {showCommandPalette && (
+        <CommandPalette
+          scripts={scripts}
+          onClose={() => setShowCommandPalette(false)}
+          onRunScript={handleRunScript}
+          onRunInTerminal={handleRunInTerminal}
+          onShowLogs={setShowLogs}
+          onSelect={(script) => setSelectedId(script.id)}
+          onOpenInEditor={(script) => { openInEditor(script.path, settings.editorApp).catch(() => {}); }}
+        />
+      )}
+
+      {/* Confirm before run dialog */}
+      {pendingConfirm && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center" style={{ background: 'var(--overlay)' }}>
+          <div className="modal-panel p-5 mx-6 max-w-[300px] w-full space-y-4">
+            <div className="text-center">
+              <p className="text-sm text-primary font-medium">Run "{pendingConfirm.script.name}"?</p>
+              <p className="text-xs text-muted mt-1">This script requires confirmation before execution.</p>
+            </div>
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => setPendingConfirm(null)}
+                className="px-4 py-2 rounded-md text-xs font-medium text-secondary border border-[color:var(--border)] hover:bg-[rgba(94,158,250,0.08)]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmRun}
+                className="px-4 py-2 rounded-md text-xs font-medium text-white bg-[color:var(--accent)] hover:bg-[color:var(--accent-hover)]"
+                autoFocus
+              >
+                Run
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

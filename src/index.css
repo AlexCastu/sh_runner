@@ -269,3 +269,46 @@ body.theme-light .code-block {
   border-bottom-left-radius: 14px;
   border-bottom-right-radius: 14px;
 }
+
+/* Action bar */
+.action-bar {
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+  position: relative;
+  z-index: 40;
+  flex-shrink: 0;
+}
+
+.action-bar-btn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.action-bar-btn:hover {
+  color: var(--text);
+  background: rgba(94, 158, 250, 0.12);
+}
+
+.action-bar-key {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(94, 158, 250, 0.12);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+/* Hide scrollbar for tag chips */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

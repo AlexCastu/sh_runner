@@ -1,4 +1,4 @@
-import { readDir, exists, watch } from '@tauri-apps/plugin-fs';
+import { readDir, exists, watch, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { Command, Child } from '@tauri-apps/plugin-shell';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -34,15 +34,26 @@ export async function scanScriptsFolder(folderPath: string): Promise<string[]> {
     throw new Error(`Folder does not exist: ${expandedPath}`);
   }
 
-  const entries = await readDir(expandedPath);
   const scripts: string[] = [];
 
-  for (const entry of entries) {
-    if (entry.name && entry.name.endsWith('.sh')) {
-      scripts.push(`${expandedPath}/${entry.name}`);
+  async function scanDir(dirPath: string) {
+    const entries = await readDir(dirPath);
+    for (const entry of entries) {
+      if (!entry.name) continue;
+      const fullPath = `${dirPath}/${entry.name}`;
+      if (entry.name.endsWith('.sh')) {
+        scripts.push(fullPath);
+      } else if (entry.isDirectory) {
+        try {
+          await scanDir(fullPath);
+        } catch {
+          // Skip directories we can't read
+        }
+      }
     }
   }
 
+  await scanDir(expandedPath);
   return scripts.sort((a, b) => a.localeCompare(b));
 }
 
@@ -66,6 +77,97 @@ export function getScriptName(path: string): string {
   const parts = path.split('/');
   const filename = parts[parts.length - 1];
   return filename.replace(/\.sh$/, '');
+}
+
+/** Get the folder that contains this script, relative to a root folder. */
+export function getScriptFolder(scriptPath: string, rootFolders: string[]): string {
+  // Find which root folder this script belongs to
+  let bestRoot = '';
+  for (const root of rootFolders) {
+    if (scriptPath.startsWith(root) && root.length > bestRoot.length) {
+      bestRoot = root;
+    }
+  }
+  if (!bestRoot) {
+    // Fallback: use parent directory name
+    const parts = scriptPath.split('/');
+    return parts.length >= 2 ? parts[parts.length - 2] : '';
+  }
+  // Get relative path from root to the script's parent directory
+  const relative = scriptPath.slice(bestRoot.length + 1); // +1 for trailing /
+  const parts = relative.split('/');
+  if (parts.length <= 1) {
+    // Script is directly in root
+    const rootParts = bestRoot.split('/');
+    return rootParts[rootParts.length - 1] || bestRoot;
+  }
+  // Script is in a subdirectory
+  const rootName = bestRoot.split('/').pop() || bestRoot;
+  const subPath = parts.slice(0, -1).join('/');
+  return `${rootName}/${subPath}`;
+}
+
+/**
+ * Read the first comment lines from a .sh file (after shebang) to use as description.
+ * Returns up to 2 comment lines joined, or empty string if none found.
+ */
+export async function readScriptDescription(scriptPath: string): Promise<string> {
+  try {
+    const content = await readTextFile(scriptPath);
+    const lines = content.split('\n');
+    const descLines: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      // Skip empty lines at the top
+      if (trimmed === '') continue;
+      // Skip shebang
+      if (trimmed.startsWith('#!')) continue;
+      // Collect comment lines (strip the # prefix)
+      if (trimmed.startsWith('#')) {
+        const text = trimmed.replace(/^#+\s*/, '').trim();
+        if (text) descLines.push(text);
+        if (descLines.length >= 2) break;
+        continue;
+      }
+      // Stop at first non-comment/non-empty line
+      break;
+    }
+
+    return descLines.join(' — ');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Create a new .sh script file with a basic template.
+ * Returns the full path of the created file.
+ */
+export async function createScript(folderPath: string, name: string): Promise<string> {
+  const homeDir = await getHomeDir();
+  const expandedFolder = expandPath(folderPath, homeDir);
+  // Sanitize name: strip extension if user typed it, ensure .sh
+  const sanitized = name.replace(/\.sh$/i, '').replace(/[^a-zA-Z0-9_\-. ]/g, '_');
+  if (!sanitized) throw new Error('Invalid script name');
+  const fileName = `${sanitized}.sh`;
+  const fullPath = `${expandedFolder}/${fileName}`;
+
+  const fileExists = await exists(fullPath);
+  if (fileExists) throw new Error(`Script "${fileName}" already exists`);
+
+  const template = `#!/bin/bash
+# ${sanitized}
+# Created on ${new Date().toISOString().split('T')[0]}
+
+set -euo pipefail
+
+echo "Hello from ${sanitized}"
+`;
+
+  await writeTextFile(fullPath, template);
+  await makeExecutable(fullPath);
+  return fullPath;
 }
 
 export async function makeExecutable(scriptPath: string): Promise<void> {
@@ -269,7 +371,7 @@ export async function watchFolder(
   const expandedPath = expandPath(folderPath, homeDir);
 
   try {
-    const unwatch = await watch(expandedPath, onChange, { recursive: false });
+    const unwatch = await watch(expandedPath, onChange, { recursive: true });
     return unwatch;
   } catch {
     // Return no-op if watch fails
